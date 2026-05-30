@@ -147,12 +147,12 @@ def _print_report(report: dict):
     if sem:
         print(f"\n── Semantic Skill Match ─── Score: {sem['semantic_score']}% ──────────────")
         print("  Semantically matched:")
-        for skill, sim in sem["matched"][:6]:
-            print(f"    ≈  {skill:<28} similarity: {sim}")
+        for item in sem["matched"][:6]:
+            print(f"    ≈  {item['skill']:<28} similarity: {item['score']}")
         if sem["missing"]:
             print("  Semantically missing:")
-            for skill, sim in sem["missing"][:6]:
-                print(f"    ✗  {skill:<28} similarity: {sim}")
+            for item in sem["missing"][:6]:
+                print(f"    ✗  {item['skill']:<28} similarity: {item['score']}")
 
     print("\n── Missing High-Value Skills ───────────────────────────────────")
     jd_ranked = report.get("jd_ranked_missing")

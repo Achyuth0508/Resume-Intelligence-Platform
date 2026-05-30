@@ -1,7 +1,22 @@
+import re
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
 MODEL_NAME = "all-MiniLM-L6-v2"
+
+
+def split_sentences(text: str) -> list[str]:
+    chunks = re.split(r"[.\n•\-]", text)
+
+    cleaned = []
+
+    for chunk in chunks:
+        chunk = chunk.strip()
+
+        if len(chunk) > 5:
+            cleaned.append(chunk)
+
+    return cleaned
 
 
 class SemanticMatcher:
@@ -24,8 +39,11 @@ class SemanticMatcher:
     def resume_jd_score(self, resume_text: str, jd_text: str) -> dict:
         resume_vec = self.embed(resume_text)
         jd_vec = self.embed(jd_text)
+
         raw = self.cosine_sim(resume_vec, jd_vec)
+
         score = round(((raw + 1) / 2) * 100, 2)
+
         return {
             "similarity_score": score,
             "interpretation": _interpret_jd_similarity(score),
@@ -35,32 +53,67 @@ class SemanticMatcher:
         self,
         resume_text: str,
         target_skills: list[str],
-        threshold: float = 0.30,
+        threshold: float = 0.45,
     ) -> dict:
-        resume_vec = self.embed(resume_text)
+
+        chunks = split_sentences(resume_text)
+
+        if not chunks:
+            return {
+                "semantic_score": 0.0,
+                "matched": [],
+                "missing": [
+                    {
+                        "skill": skill,
+                        "score": 0.0,
+                        "evidence": "",
+                    }
+                    for skill in target_skills
+                ],
+            }
+
+        chunk_vecs = self.embed_batch(chunks)
         skill_vecs = self.embed_batch(target_skills)
 
-        matched_semantically = []
-        missing_semantically = []
+        matched = []
+        missing = []
 
         for skill, skill_vec in zip(target_skills, skill_vecs):
-            sim = self.cosine_sim(skill_vec, resume_vec)
-            if sim >= threshold:
-                matched_semantically.append((skill, round(sim, 3)))
+
+            sims = [
+                self.cosine_sim(skill_vec, chunk_vec)
+                for chunk_vec in chunk_vecs
+            ]
+
+            best_idx = int(np.argmax(sims))
+            best_sim = float(sims[best_idx])
+            best_chunk = chunks[best_idx]
+
+            result = {
+                "skill": skill,
+                "score": round(best_sim, 3),
+                "evidence": best_chunk,
+            }
+
+            if best_sim >= threshold:
+                matched.append(result)
             else:
-                missing_semantically.append((skill, round(sim, 3)))
+                missing.append(result)
 
-        matched_semantically.sort(key=lambda x: x[1], reverse=True)
-        missing_semantically.sort(key=lambda x: x[1], reverse=True)
+        matched.sort(key=lambda x: x["score"], reverse=True)
+        missing.sort(key=lambda x: x["score"], reverse=True)
 
-        semantic_score = round(
-            (len(matched_semantically) / len(target_skills)) * 100, 2
-        ) if target_skills else 0.0
+        all_scores = [x["score"] for x in matched + missing]
+
+        semantic_score = (
+            round(float(np.mean(all_scores)) * 100, 2)
+            if all_scores else 0.0
+        )
 
         return {
             "semantic_score": semantic_score,
-            "matched": matched_semantically,
-            "missing": missing_semantically,
+            "matched": matched,
+            "missing": missing,
         }
 
     def score_projects_semantically(
@@ -68,6 +121,7 @@ class SemanticMatcher:
         projects_text: str,
         role: str,
     ) -> float:
+
         if not projects_text.strip():
             return 0.0
 
@@ -93,9 +147,15 @@ class SemanticMatcher:
         project_vec = self.embed(projects_text)
         ref_vecs = self.embed_batch(reference_descriptions)
 
-        similarities = [self.cosine_sim(project_vec, ref_vec) for ref_vec in ref_vecs]
+        similarities = [
+            self.cosine_sim(project_vec, ref_vec)
+            for ref_vec in ref_vecs
+        ]
+
         avg_sim = float(np.mean(similarities))
+
         score = round(((avg_sim + 1) / 2) * 100, 2)
+
         return min(score, 100.0)
 
     def rank_missing_skills_by_jd(
@@ -103,25 +163,41 @@ class SemanticMatcher:
         missing_skills: list[str],
         jd_text: str,
     ) -> list[tuple[str, float]]:
+
         if not missing_skills or not jd_text:
             return [(s, 0.0) for s in missing_skills]
+
         jd_vec = self.embed(jd_text)
         skill_vecs = self.embed_batch(missing_skills)
+
         scored = [
-            (skill, round(self.cosine_sim(sv, jd_vec), 3))
+            (
+                skill,
+                round(self.cosine_sim(sv, jd_vec), 3)
+            )
             for skill, sv in zip(missing_skills, skill_vecs)
         ]
-        return sorted(scored, key=lambda x: x[1], reverse=True)
+
+        return sorted(
+            scored,
+            key=lambda x: x[1],
+            reverse=True
+        )
 
 
 def _interpret_jd_similarity(score: float) -> str:
+
     if score >= 80:
         return "Excellent match — strong alignment with the job description."
+
     elif score >= 65:
         return "Good match — resume covers most key requirements."
+
     elif score >= 50:
         return "Moderate match — some relevant experience but gaps exist."
+
     elif score >= 35:
         return "Weak match — significant alignment gaps with the JD."
+
     else:
         return "Poor match — resume does not align well with this role."

@@ -161,4 +161,4 @@ POST /analyze
 =======
 # Resume-Intelligence-Platform
 AI-powered resume analysis platform using semantic matching, ATS-style scoring, and AI-assisted feedback.
->>>>>>> c62de9de768f2ea507c19d46e7130f79395a5fb9
+
